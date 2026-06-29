@@ -123,7 +123,7 @@ class LMStudioClient:
                     "Attempt %d/%d failed: %s", attempt, self.max_retries, e
                 )
                 if attempt < self.max_retries:
-                    time.sleep(self.retry_delay * attempt)
+                    time.sleep(self.retry_delay * (2 ** (attempt - 1)))
                 else:
                     raise LMStudioClientError(
                         f"Request failed after {self.max_retries} attempts: {e}"

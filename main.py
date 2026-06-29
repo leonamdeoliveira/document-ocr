@@ -45,6 +45,9 @@ def _pick_model() -> str:
     if not models:
         logger.error("No models found in models/ directory")
         sys.exit(1)
+    if not sys.stdin.isatty():
+        logger.error("No --model specified and no interactive terminal available")
+        sys.exit(1)
     print("\nModelos de OCR disponiveis:")
     for i, m in enumerate(models, 1):
         cfg = load_model_config(m)

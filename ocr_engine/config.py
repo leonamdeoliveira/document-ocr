@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import ClassVar
 
 
 @dataclass
@@ -10,7 +11,7 @@ class HybridOCRConfig:
     quality_threshold_accept: float = 0.70
     ocr_timeout: int = 120
 
-    VALID_MODES = {"legacy", "hybrid", "classic_only", "ai_only"}
+    VALID_MODES: ClassVar[set[str]] = {"legacy", "hybrid", "classic_only", "ai_only"}
 
     def __post_init__(self):
         if self.mode not in self.VALID_MODES:

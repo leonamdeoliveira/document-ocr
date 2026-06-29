@@ -30,7 +30,14 @@ def extract_docx(path: Path) -> str:
     for table in doc.tables:
         lines.append("")
         for row in table.rows:
-            cells = [cell.text.strip() for cell in row.cells]
+            cells = []
+            seen = set()
+            for cell in row.cells:
+                cell_id = id(cell._tc)
+                if cell_id in seen:
+                    continue
+                seen.add(cell_id)
+                cells.append(cell.text.strip())
             lines.append("| " + " | ".join(cells) + " |")
         lines.append("")
 
