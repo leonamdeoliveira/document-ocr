@@ -1,6 +1,6 @@
 ---
 name: document-ocr
-description: Leitura de PDFs, imagens, DOCX, PPTX e HTML usando OCR hibrido (Tesseract + IA via LM Studio) ou extracao nativa de texto. Converte documentos para Markdown/HTML/JSON estruturado. Use quando o usuario pedir para "ler PDF", "extrair texto de imagem", "converter documento", "ler DOCX", "ler PPT", "ler HTML", "OCR" ou "transformar PDF em markdown".
+description: Leitura de PDFs, imagens, DOCX, PPTX e HTML usando OCR hibrido (Tesseract + IA via LM Studio) ou extracao nativa de texto. Converte documentos para Markdown/HTML/JSON estruturado. Use quando o usuario pedir para "ler PDF", "extrair texto de imagem", "converter documento", "ler DOCX", "ler PPT", "ler HTML", "OCR" ou "transformar PDF em markdown". Compatível com opencode, Claude Code, Cursor, GitHub Copilot, Windsurf e outros assistentes de IA.
 ---
 
 # Document OCR - Pipeline de Leitura de Documentos

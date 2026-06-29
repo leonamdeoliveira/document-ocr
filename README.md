@@ -1,34 +1,36 @@
 # Document OCR + Pipeline Hibrido
 
-Pipeline OCR completo para converter PDFs, imagens, DOCX, PPTX e HTML em Markdown/HTML/JSON estruturado. Suporta **OCR clasico** (Tesseract, PaddleOCR) para documentos simples e **OCR por IA** (LM Studio) para documentos complexos, com roteamento inteligente entre eles.
+Pipeline OCR completo para converter PDFs, imagens, DOCX, PPTX e HTML em Markdown/HTML/JSON estruturado. Suporta **OCR clasico** (Tesseract) para documentos simples e **OCR por IA** (LM Studio) para documentos complexos, com roteamento inteligente entre eles.
+
+> Esta e uma **skill** compatível com os principais assistentes de IA. O arquivo `SKILL.md` define o comportamento do agente.
 
 ## Arquitetura
 
-### OCR Hibrido (novo)
+### OCR Hibrido
 
 ```
                     ┌──────────────┐
                     │  OCRRouter   │
                     └──────┬───────┘
                            │
-              ┌────────────┼────────────┐
-              ▼            ▼            ▼
-        ┌──────────┐ ┌──────────┐ ┌──────────┐
-        │ Tesseract│ │ PaddleOCR│ │ AIEngine │
-        │ (rapido) │ │ (medio)  │ │ (GLM-OCR)│
-        └──────────┘ └──────────┘ └──────────┘
-              │            │            │
-              ▼            ▼            ▼
-        ┌─────────────────────────────────────┐
-        │        QualityScorer                │
-        │  (heuristica de qualidade do texto) │
-        └─────────────────────────────────────┘
-              │
-              ▼
-        ┌─────────────────────────────────────┐
-        │        OutputNormalizer             │
-        │  (limp eza d e ruido de OCR)         │
-        └─────────────────────────────────────┘
+               ┌───────────┴───────────┐
+               ▼                       ▼
+         ┌──────────┐           ┌──────────┐
+         │ Tesseract│           │ AIEngine │
+         │ (rapido) │           │ (GLM-OCR)│
+         └──────────┘           └──────────┘
+               │                       │
+               ▼                       ▼
+         ┌─────────────────────────────────────┐
+         │        QualityScorer                │
+         │  (avaliacao referencia/heuristica)  │
+         └─────────────────────────────────────┘
+               │
+               ▼
+         ┌─────────────────────────────────────┐
+         │        OCRPipeline                  │
+         │  (limpeza, normalizacao, saida)     │
+         └─────────────────────────────────────┘
 ```
 
 ### Fluxo Original (legado)
@@ -44,8 +46,22 @@ DOCX/PPTX/HTML → Extracao nativa (python-docx / python-pptx / html2text) → M
 |------|-----------|-------------|
 | `legacy` | IA via LM Studio (comportamento original) | Documentos complexos, compatibilidade total |
 | `hybrid` | Tenta Tesseract, fallback para IA | Uso geral, equilibrio velocidade/qualidade |
-| `classic_only` | So OCR clasico (Tesseract/Paddle) | Documentos simples, sem IA disponivel |
+| `classic_only` | So OCR clasico (Tesseract) | Documentos simples, sem IA disponivel |
 | `ai_only` | So IA (como legacy) | Documentos complexos |
+
+## Compatibilidade com Assistentes de IA
+
+| Ferramenta | Como usar |
+|---|---|
+| **opencode** | Copie a pasta para `~/.agents/skills/document-ocr/` — ativacao automatica |
+| **Claude Code** | Copie a pasta para `~/.claude/skills/document-ocr/` — ativacao automatica |
+| **Cursor** | Copie o conteudo do `SKILL.md` para `.cursor/rules/document-ocr.mdc` na raiz do projeto |
+| **GitHub Copilot** | Copie o conteudo do `SKILL.md` (sem o bloco YAML) para `.github/copilot-instructions.md` |
+| **Windsurf** | Copie o conteudo do `SKILL.md` (sem o bloco YAML) para `.windsurfrules` na raiz do projeto |
+| **Aider** | Use `--read SKILL.md` ou configure no `.aider.conf.yml` |
+| **Outros** | Use o `SKILL.md` como system prompt ou custom instructions da ferramenta |
+
+> **Nota:** Para ferramentas que nao suportam o placeholder `SKILL_DIR`, substitua todas as ocorrencias de `SKILL_DIR` pelo caminho absoluto onde a skill foi instalada.
 
 ## Instalacao
 
@@ -61,9 +77,6 @@ pip install -r requirements.txt
 # Tesseract (Windows):
 winget install -e --id UB-Mannheim.TesseractOCR
 pip install pytesseract
-
-# PaddleOCR (opcional):
-pip install paddleocr
 ```
 
 ### OCR por IA
@@ -73,17 +86,17 @@ Baixe o LM Studio em: https://lmstudio.ai/
 ## Uso
 
 ```bash
-# Modo legado (comportamento original):
+# Modo hibrido (default: Tesseract com fallback para IA):
 python main.py documento.pdf
-
-# Modo hibrido (Tesseract com fallback para IA):
-python main.py documento.pdf --ocr-mode hybrid
 
 # Modo classico (so Tesseract, sem LM Studio):
 python main.py documento.pdf --ocr-mode classic_only
 
-# Modo IA (como legacy):
+# Modo IA (so LM Studio):
 python main.py documento.pdf --ocr-mode ai_only
+
+# Modo legado (comportamento original):
+python main.py documento.pdf --ocr-mode legacy
 
 # Com parametros customizados:
 python main.py documento.pdf \
@@ -114,8 +127,8 @@ python main.py pagina.html
 | `--mode` | `text-first` ou `ocr-only` | `text-first` |
 | `--dpi` | Resolucao de renderizacao do PDF | `200` |
 | `--resume` | Retoma processamento interrompido | `false` |
-| `--ocr-mode` | `legacy`, `hybrid`, `classic_only`, `ai_only` | `legacy` |
-| `--classic-engine` | Motor clasico: `tesseract`, `paddle` | `tesseract` |
+| `--ocr-mode` | `legacy`, `hybrid`, `classic_only`, `ai_only` | `hybrid` |
+| `--classic-engine` | Motor clasico: `tesseract` | (env CLASSIC_OCR_ENGINE ou `tesseract`) |
 | `--ocr-langs` | Idiomas para OCR clasico (ex: `por+eng`) | `por+eng` |
 | `--quality-threshold` | Score minimo para aceitar OCR clasico (0-1) | `0.70` |
 | `--timeout` | Timeout por requisicao (s) | `300` |
@@ -131,26 +144,22 @@ document-ocr/
 ├── ocr_pipeline.py            # Orquestracao do pipeline
 ├── pdf_utils.py               # Renderizacao de PDF (PyMuPDF)
 ├── lmstudio_client.py         # Cliente HTTP LM Studio
+├── requirements.txt           # Dependencias Python
+├── SKILL.md                   # Definicao da skill (opencode / Claude Code)
+├── .env.example               # Template de variaveis de ambiente
 ├── ocr_engine/                # Motores de OCR
 │   ├── base.py                # Interface OCREngineBase
 │   ├── config.py              # HybridOCRConfig
 │   ├── quality.py             # QualityScorer
-│   ├── normalizer.py          # OutputNormalizer
 │   ├── router.py              # OCRRouter
 │   ├── ai_engine.py           # AIEngine (GLM-OCR)
 │   ├── tesseract_engine.py    # TesseractEngine
-│   └── paddle_engine.py       # PaddleEngine (opcional)
+│   └── text_stats.py          # Tokenizacao e estatisticas
 ├── models/                    # Configuracoes dos modelos
 │   ├── chandra-ocr-2/
 │   ├── glm-ocr/
 │   └── template/
-├── tests/                     # Testes
-│   ├── test_quality.py
-│   ├── test_normalizer.py
-│   ├── test_router.py
-│   ├── test_regression.py
-│   └── test_config.py
-└── tasks/                     # Planos de implementacao
+└── saida_ocr/                 # Diretorio de saida (gerado)
 ```
 
 ## Modelos Disponiveis
@@ -161,16 +170,6 @@ document-ocr/
 | `glm-ocr` | Markdown diretamente | Nao | Nao |
 
 Para adicionar um novo modelo, copie `models/template/` e edite `config.json` e `prompts.py`.
-
-## Testes
-
-```bash
-python tests/test_quality.py
-python tests/test_normalizer.py
-python tests/test_config.py
-python tests/test_router.py
-python tests/test_regression.py
-```
 
 ## Troubleshooting
 
