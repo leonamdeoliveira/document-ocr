@@ -306,8 +306,7 @@ class OCRPipeline:
     def _strip_html_attrs(html: str) -> str:
         html = re.sub(r'\sdata-[a-zA-Z_-]+="[^"]*"', '', html)
         html = re.sub(r"\sdata-[a-zA-Z_-]+='[^']*'", '', html)
-        html = re.sub(r'\s(class|style|id|data)="[^"]*"', '', html)
-        html = re.sub(r"\s(class|style|id|data)='[^']*'", '', html)
+        html = re.sub(r'\s(?:class|style|id|data)=(?:"[^"]*"|\'[^\']*\'|[^\s>]+)', '', html)
         return html
 
     @staticmethod
@@ -319,7 +318,7 @@ class OCRPipeline:
         html = re.sub(r'<h([1-6])[^>]*>(.*?)</h\1>', lambda m: '#' * int(m.group(1)) + ' ' + m.group(2), html, flags=re.DOTALL)
         html = re.sub(r'<table[^>]*>(.*?)</table>', lambda m: OCRPipeline._table_to_markdown(m.group(1)), html, flags=re.DOTALL)
         html = re.sub(r'<li[^>]*>(.*?)</li>', r'- \1', html, flags=re.DOTALL)
-        html = re.sub(r'</?u?[ol][^>]*>', '', html)
+        html = re.sub(r'</?(?:ul|ol)[^>]*>', '', html)
         html = re.sub(r'<br\s*/?>\s*<br\s*/?>', '\n\n', html)
         html = re.sub(r'<br\s*/?>', '\n', html)
 
@@ -552,7 +551,7 @@ class OCRPipeline:
             if prefix[pref] > max_repeat * 2:
                 cutoff = i
                 break
-        return "\n".join(lines[:cutoff]).strip()
+        return "\n".join(lines[:cutoff]).strip() if cutoff > 0 else content
 
     def _clean_output(self, content: str, fmt: str = "markdown") -> str:
         content = self._strip_reasoning(content)
@@ -658,7 +657,7 @@ class OCRPipeline:
         system_prompt = "" if not self._use_system_prompt else None
 
         if self._use_image_only:
-            content = self.client.ocr_image("", page.image, system_prompt="")
+            content = self.client.ocr_image("", page.image, system_prompt=system_prompt)
         elif self.mode == "text-first" and page.native_text and self._use_native_ref:
             enhanced_prompt = (
                 f"{prompt}\n\n"
@@ -674,7 +673,8 @@ class OCRPipeline:
 
     def _process_batch(self, pages: list[PDFPage], fmt: str) -> str:
         images = [p.image for p in pages]
-        return self.client.ocr_images("", images, system_prompt="")
+        raw = self.client.ocr_images("", images, system_prompt="")
+        return self._clean_output(raw, fmt)
 
     def _prepare_outputs(self):
         for fmt in self.formats:
