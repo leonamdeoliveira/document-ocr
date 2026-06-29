@@ -8,9 +8,10 @@ from typing import Optional
 from lmstudio_client import LMStudioClient, LMStudioClientError
 from model_loader import load_model_config, load_model_prompts
 from pdf_utils import PDFPage, load_pdf
-from ocr_engine.base import OCREngineError
+from ocr_engine.base import OCREngineError, EngineNotAvailableError
 from ocr_engine.router import OCRRouter
 from ocr_engine.config import HybridOCRConfig
+from ocr_engine.text_stats import tokenize, extract_numbers
 
 logger = logging.getLogger(__name__)
 
@@ -336,35 +337,13 @@ class OCRPipeline:
         self._output_path("json").write_text(combined, encoding="utf-8")
         logger.info("Saved %s", self._output_path("json"))
 
-    _STOPWORDS = frozenset({
-        "a", "about", "above", "after", "again", "against", "all", "am", "an",
-        "and", "any", "are", "as", "at", "be", "because", "been", "before",
-        "being", "below", "between", "both", "but", "by", "can", "could",
-        "did", "do", "does", "doing", "don", "down", "during", "each", "few",
-        "for", "from", "further", "had", "has", "have", "having", "he", "her",
-        "here", "hers", "herself", "him", "himself", "his", "how", "i", "if",
-        "in", "into", "is", "it", "its", "itself", "just", "me", "more",
-        "most", "my", "myself", "no", "nor", "not", "now", "of", "on", "once",
-        "only", "or", "other", "our", "ours", "ourselves", "out", "over",
-        "own", "per", "que", "s", "same", "she", "should", "so", "some",
-        "such", "t", "than", "that", "the", "their", "them", "themselves",
-        "then", "there", "these", "they", "this", "those", "through", "to",
-        "too", "under", "until", "up", "us", "very", "was", "we", "were",
-        "what", "when", "where", "which", "while", "who", "whom", "why",
-        "will", "with", "you", "your", "yours", "yourself", "yourselves",
-        "da", "das", "de", "do", "dos", "em", "na", "nas", "no", "nos",
-        "num", "numa", "numas", "nuns", "o", "os", "para", "pelo", "pela",
-        "pelos", "pelas", "por", "se", "suas", "um", "uma", "umas", "uns",
-    })
-
     @staticmethod
     def _tokenize(text: str) -> set[str]:
-        words = re.findall(r"[a-zA-Z]{4,}", text.lower())
-        return {w for w in words if w not in OCRPipeline._STOPWORDS}
+        return tokenize(text)
 
     @staticmethod
     def _extract_numbers(text: str) -> set[str]:
-        return set(re.findall(r"\b\d+(?:[.,]\d+)+\b|\b\d{2,}\b", text))
+        return extract_numbers(text)
 
     @staticmethod
     def _extract_headings(text: str) -> list[str]:
@@ -568,6 +547,12 @@ class OCRPipeline:
                     self._append_saida(fmt, content)
                     output_chars = len(content)
 
+            except EngineNotAvailableError as e:
+                msg = str(e)
+                logger.error("Page %d failed: %s", page_num, msg)
+                print(f"\n[!] Pagina {page_num} precisa de IA mas LM Studio nao esta disponivel.", flush=True)
+                print(f"    {msg}", flush=True)
+                status = "error: lm_studio_needed"
             except (LMStudioClientError, OCREngineError) as e:
                 logger.error("Page %d failed: %s", page_num, e)
                 status = f"error: {e}"
@@ -590,7 +575,26 @@ class OCRPipeline:
         self._verify_completeness(pages, results)
 
         ok_count = sum(1 for r in results if r.status in ("ok", "resumed"))
+        lmstudio_needed = sum(1 for r in results if r.status == "error: lm_studio_needed")
         all_ok = ok_count == total
+
+        if lmstudio_needed > 0:
+            print(
+                f"\n{'='*60}\n"
+                f"  ATENCAO: {lmstudio_needed} pagina(s) precisam de IA (GLM-OCR)\n"
+                f"  mas o LM Studio nao estava rodando.\n"
+                f"\n"
+                f"  Para processar essas paginas com qualidade:\n"
+                f"  1. Abra o LM Studio\n"
+                f"  2. Carregue o modelo de OCR (ex: glm-ocr)\n"
+                f"  3. Inicie o servidor em http://localhost:1234/v1\n"
+                f"  4. Execute novamente com --ocr-mode hybrid --resume\n"
+                f"\n"
+                f"  As demais paginas foram processadas com OCR classico\n"
+                f"  e estao disponiveis no arquivo de saida.\n"
+                f"{'='*60}\n",
+                flush=True,
+            )
 
         if all_ok:
             for partial in self.output_dir.glob("page_*.partial"):

@@ -66,28 +66,6 @@ class TesseractEngine(OCREngineBase):
         start = time.time()
         try:
             lang = kwargs.get("langs", self._langs)
-            text = pytesseract.image_to_string(page.image, lang=lang, timeout=self._timeout)
-        except RuntimeError as e:
-            raise OCREngineError(f"Tesseract failed: {e}") from e
-
-        elapsed = time.time() - start
-        return EngineResult(
-            text=text.strip(),
-            engine_name=self.name,
-            confidence=0.7,
-            processing_time=elapsed,
-            metadata={"langs": self._langs, "method": "image_to_string"},
-        )
-
-    def extract_text_with_confidence(self, page: PDFPage, **kwargs) -> EngineResult:
-        if not self.is_available():
-            raise EngineNotAvailableError("Tesseract is not installed")
-
-        import pytesseract
-
-        start = time.time()
-        try:
-            lang = kwargs.get("langs", self._langs)
             data = pytesseract.image_to_data(page.image, lang=lang, output_type=pytesseract.Output.DICT, timeout=self._timeout)
             confidences = [c for c in data["conf"] if c > 0]
             avg_conf = sum(confidences) / len(confidences) / 100.0 if confidences else 0.0
@@ -103,11 +81,11 @@ class TesseractEngine(OCREngineBase):
 
         elapsed = time.time() - start
         return EngineResult(
-            text=text,
+            text=text.strip(),
             engine_name=self.name,
             confidence=avg_conf,
             processing_time=elapsed,
-            metadata={"langs": self._langs, "method": "image_to_data", "mean_word_conf": avg_conf},
+            metadata={"langs": self._langs, "method": "image_to_data", "mean_word_conf": round(avg_conf, 4)},
         )
 
     @staticmethod

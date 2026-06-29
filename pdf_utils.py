@@ -22,7 +22,7 @@ def render_page(page: fitz.Page, dpi: int = 200) -> Image.Image:
 
 
 def extract_native_text(page: fitz.Page) -> str:
-    return page.get_text("text")
+    return page.get_text("text", sort=True)
 
 
 def has_meaningful_text(text: str, min_chars: int = 50) -> bool:

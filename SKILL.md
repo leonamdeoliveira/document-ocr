@@ -1,11 +1,11 @@
 ---
 name: document-ocr
-description: Leitura de PDFs, imagens, DOCX, PPTX e HTML usando OCR via LM Studio, OCR clasico (Tesseract/PaddleOCR) ou extracao nativa de texto. Converte documentos para Markdown/HTML/JSON estruturado. Use quando o usuario pedir para "ler PDF", "extrair texto de imagem", "converter documento", "ler DOCX", "ler PPT", "ler HTML", "OCR" ou "transformar PDF em markdown".
+description: Leitura de PDFs, imagens, DOCX, PPTX e HTML usando OCR hibrido (Tesseract + IA via LM Studio) ou extracao nativa de texto. Converte documentos para Markdown/HTML/JSON estruturado. Use quando o usuario pedir para "ler PDF", "extrair texto de imagem", "converter documento", "ler DOCX", "ler PPT", "ler HTML", "OCR" ou "transformar PDF em markdown".
 ---
 
 # Document OCR - Pipeline de Leitura de Documentos
 
-Converte PDFs e imagens em texto estruturado (Markdown/HTML/JSON) usando pipeline hibrido: OCR clasico (Tesseract, PaddleOCR) para documentos simples ou IA multimodal via LM Studio para documentos complexos.
+Converte PDFs e imagens em texto estruturado (Markdown/HTML/JSON) usando pipeline hibrido inteligente: Tesseract para OCR classico com **avaliacao por referencia** (compara contra texto nativo do PDF) e fallback automatico para IA multimodal via LM Studio quando a qualidade nao atinge o threshold.
 
 ## Quando Usar (Disparo Automatico)
 
@@ -33,20 +33,17 @@ SKILL_DIR/
 ├── ocr_pipeline.py            # Orquestracao do pipeline
 ├── pdf_utils.py               # Renderizacao e extracao de texto
 ├── lmstudio_client.py         # Cliente HTTP OpenAI-compatible
-├── ocr_engine/                # Motores de OCR (novo)
+├── ocr_engine/                # Motores de OCR
 │   ├── __init__.py            # Exports publicos
 │   ├── base.py                # Interface OCREngineBase + EngineResult
 │   ├── config.py              # HybridOCRConfig
 │   ├── quality.py             # QualityScorer (heuristica de qualidade)
-│   ├── normalizer.py          # OutputNormalizer (limpeza de OCR)
 │   ├── router.py              # OCRRouter (roteamento inteligente)
 │   ├── ai_engine.py           # AIEngine (LM Studio / GLM-OCR)
-│   ├── tesseract_engine.py    # TesseractEngine (Tesseract + OCRmyPDF)
-│   └── paddle_engine.py       # PaddleEngine (PaddleOCR, opcional)
+│   └── tesseract_engine.py    # TesseractEngine (com confianca real via image_to_data)
 ├── requirements.txt           # Dependencias
 ├── .env.example               # Template de configuracao
 ├── README.md                  # Documentacao
-├── tasks/                     # Planos de implementacao
 └── models/                    # Modelos de OCR
     ├── chandra-ocr-2/         # Chandra OCR 2 (retorna HTML)
     ├── glm-ocr/               # GLM-OCR (retorna Markdown)
@@ -67,11 +64,11 @@ python --version
 Baixe o LM Studio em: https://lmstudio.ai/
 
 Apos instalar e abrir:
-1. Va na aba "Search" e busque pelo modelo desejado (ex: `chandra-ocr-2`, `glm-ocr`)
+1. Va na aba "Search" e busque pelo modelo desejado (ex: `glm-ocr`)
 2. Baixe o modelo
 3. Va em "Local Inference Server", selecione o modelo e clique "Start Server"
 
-### 3. Instalar Tesseract (para OCR clasico, Windows)
+### 3. Instalar Tesseract (para OCR classico, Windows)
 
 ```powershell
 winget install -e --id UB-Mannheim.TesseractOCR
@@ -83,11 +80,6 @@ Ou baixe manualmente de: https://github.com/UB-Mannheim/tesseract/wiki
 
 ```bash
 pip install -r requirements.txt
-
-# Opcionais para OCR clasico:
-pip install pytesseract
-# pip install ocrmypdf     # Para processamento de PDFs
-# pip install paddleocr    # Para PaddleOCR (fallback alternativo)
 ```
 
 ### 5. Configurar (opcional)
@@ -117,41 +109,44 @@ pip install -r "SKILL_DIR/requirements.txt"
 O usuario forneceu um arquivo. O caminho deste arquivo sera chamado de `INPUT_PATH`.
 
 - Formatos suportados:
-  - **OCR via IA** (LM Studio): `.pdf`, `.png`, `.jpg`, `.jpeg`
-  - **OCR clasico** (Tesseract/PaddleOCR): `.pdf`, `.png`, `.jpg`, `.jpeg`
+  - **OCR hibrido** (Tesseract + IA): `.pdf`, `.png`, `.jpg`, `.jpeg`
   - **Extracao nativa** (sem OCR): `.docx`, `.pptx`, `.html`, `.htm`
 - Valide que o arquivo existe antes de prosseguir
 
 ### Passo 2: Escolher o Modo de OCR
 
-O pipeline tem **4 modos de operacao**:
+O pipeline tem **3 modos de operacao** (PaddleOCR foi removido):
 
 | Modo | Descricao | Quando usar |
 |------|-----------|-------------|
-| `legacy` (padrao) | IA via LM Studio (comportamento original) | Documentos complexos, quando LM Studio esta rodando |
-| `hybrid` | Tenta Tesseract primeiro, fallback para IA se qualidade baixa | Uso geral, equilibrio entre velocidade e qualidade |
-| `classic_only` | So OCR clasico (Tesseract/Paddle), sem IA | Documentos simples, quando LM Studio nao esta disponivel |
-| `ai_only` | So IA (como legacy) | Documentos complexos, mesma prioridade do legacy |
+| `hybrid` (padrao) | Tenta Tesseract primeiro com **avaliacao por referencia** (compara contra texto nativo do PDF). Se qualidade < threshold, fallback automatico para IA via LM Studio. | **Sempre usar como padrao.** Equilibrio entre velocidade e qualidade. |
+| `legacy` | IA via LM Studio em todas as paginas | Documentos complexos (tabelas, colunas, letras pequenas) quando LM Studio esta rodando |
+| `classic_only` | So Tesseract, sem IA e sem fallback | Documentos simples com texto claro, quando LM Studio nao esta disponivel |
+| `ai_only` | So IA (equivalente ao legacy) | Documentos complexos, mesma prioridade do legacy |
 
 **Regra de decisao para o agente:**
 
-- Se LM Studio **nao estiver rodando** e Tesseract estiver disponivel: use `--ocr-mode classic_only`
-- Se LM Studio estiver rodando e o documento for **simples** (texto claro, layout padrao): use `--ocr-mode hybrid`
-- Se LM Studio estiver rodando e o documento for **complexo** (tabelas, colunas, qualidade baixa): use `legacy` (padrao) ou `--ocr-mode ai_only`
-- Se nao souber, use o padrao (`legacy`) que mantem compatibilidade total
+- **Sempre** use `hybrid` primeiro (padrao). O pipeline:
+  1. Tenta texto nativo do PDF (instantaneo)
+  2. Se insuficiente, roda Tesseract com confianca real via `image_to_data`
+  3. Se houver texto nativo (mesmo que pequeno), **compara OCR contra ele** (vocabulario + numeros)
+  4. Se nao houver texto nativo, usa QualityScorer heuristico + confianca real do Tesseract
+  5. Se a qualidade nao atingir o threshold (0.70), faz fallback automatico para IA
+- Se LM Studio **nao estiver rodando**: o `hybrid` usa Tesseract nas paginas que passarem no teste e avisa claramente se alguma pagina precisar de IA
+- Se nao souber, use o padrao (`hybrid`)
 
 ### Passo 3: Executar o Pipeline
 
-**Modo legado (comportamento original, LM Studio obrigatorio):**
+**Modo hibrido (padrao — Tesseract com avaliacao inteligente + fallback IA):**
 
 ```bash
 python "SKILL_DIR/main.py" "INPUT_PATH"
 ```
 
-**Modo hibrido (Tesseract com fallback para IA):**
+**Modo legado (LM Studio obrigatorio):**
 
 ```bash
-python "SKILL_DIR/main.py" "INPUT_PATH" --ocr-mode hybrid
+python "SKILL_DIR/main.py" "INPUT_PATH" --ocr-mode legacy
 ```
 
 **Modo classico (so Tesseract, sem IA):**
@@ -166,20 +161,16 @@ python "SKILL_DIR/main.py" "INPUT_PATH" --ocr-mode classic_only
 python "SKILL_DIR/main.py" "INPUT_PATH" \
     --out "DIR_DO_INPUT/saida_ocr" \
     --format markdown \
-    --ocr-mode hybrid \
-    --classic-engine tesseract \
-    --ocr-langs por+eng \
-    --quality-threshold 0.70
+    --quality-threshold 0.70 \
+    --ocr-langs por+eng
 ```
 
 **Regras para escolha dos parametros:**
 - Se o usuario nao especificou formato, use `--format markdown`
-- Se o usuario nao especificou modo de OCR, use `legacy` (padrao historico)
-- Se o usuario nao especificou `--model`, pergunte: **"Qual o modelo de IA voce quer usar para extrair o texto?"** e liste as opcoes disponiveis
+- Se o usuario nao especificou modo de OCR, use `hybrid` (padrao)
+- Se o usuario nao especificou `--model`, usa `glm-ocr` automaticamente em modos hybrid/classic_only, ou pergunta interativamente em modos legacy/ai_only
 - Diretorio de saida padrao: `DIR_DO_INPUT/saida_ocr`. NUNCA salve dentro da pasta da skill.
-- Use `--resume` apenas se ja houver processamento parcial e o usuario quiser retomar
-
-**Comportamento incremental:** O pipeline escreve no arquivo a cada pagina.
+- Use `--resume` para retomar processamento parcial (util quando algumas paginas precisaram de IA e o LM Studio nao estava disponivel)
 
 ### Passo 4: Ler o Resultado
 
@@ -200,28 +191,66 @@ type "DIR_DO_INPUT/saida_ocr/NOME_DO_INPUT.md"
 ### Passo 5: Verificar Fidelidade
 
 O pipeline exibe metricas de qualidade ao final:
-- Score de qualidade do OCR clasico (quando usado)
-- Paginas processadas com sucesso / total
+- Metodo usado por pagina (native, tesseract, ai, lm_studio_needed)
+- Qualidade do OCR classico: avaliacao **por referencia** (comparacao com texto nativo) ou **heuristica** (QualityScorer)
+- Vocabulario e numeros preservados no documento consolidado
 - Resultado: **PASS** ou **PARTIAL**
 
-Se o resultado for **PARTIAL** com OCR clasico, tente aumentar `--dpi` para 300-400 ou mude para `--ocr-mode hybrid` para ativar fallback para IA.
+## Fluxo de Decisao do Router (modo hybrid)
+
+```
+1. Texto nativo do PDF >= 50 chars?
+   ├─ Sim → USA TEXTO NATIVO (instantaneo, gratuita, melhor qualidade)
+   └─ Nao → continua
+   
+2. Tenta Tesseract (com confianca real via image_to_data)
+   
+3. Tem texto nativo >= 20 chars?
+   ├─ Sim → AVALIACAO POR REFERENCIA:
+   │         - Tokeniza OCR e nativo, calcula word recall (70%)
+   │         - Extrai numeros, calcula number preservation (30%)
+   │         - combined >= threshold? → aceita
+   │         - senao → fallback IA
+   └─ Nao → AVALIACAO HEURISTICA (QualityScorer):
+             - 6 metricas: alfanumericos, simbolos, linha media,
+               linhas vazias, repeticoes, confianca Tesseract real
+             - score >= threshold? → aceita
+             - senao → fallback IA
+
+4. Fallback IA (se habilitado):
+   ├─ LM Studio rodando? → processa com GLM-OCR
+   └─ LM Studio offline? → avisa usuario + preserva parciais para --resume
+```
+
+### QualityScorer (fallback heuristico)
+
+Usado apenas quando **nao ha texto nativo** para comparacao (PDF escaneado/imagem). Analisa 6 sinais:
+
+- `alphanumeric_ratio` (35%): proporcao de letras/numeros
+- `symbol_ratio` (20%): proporcao de simbolos estranhos
+- `avg_line_length` (15%): media de chars por linha
+- `empty_line_ratio` (10%): linhas vazias
+- `repeated_chars` (10%): repeticoes suspeitas
+- `engine_confidence` (10%): confianca real do Tesseract (agora obtida via `image_to_data`)
+
+Threshold: `>= 0.70` aceita, `< 0.70` fallback para IA.
 
 ## Opcoes Completas do CLI
 
 | Argumento | Descricao | Default |
 |-----------|-----------|---------|
 | `input` | Caminho do PDF, imagem, DOCX, PPTX ou HTML | obrigatorio |
-| `--model` | Modelo de OCR (ex: `chandra-ocr-2`) | perguntado interativamente |
+| `--model` | Modelo de OCR (ex: `glm-ocr`) | `glm-ocr` (hybrid/classic_only) ou perguntado (legacy/ai_only) |
 | `--out` | Diretorio de saida | `DIR_DO_INPUT/saida_ocr` |
 | `--output-name` | Nome do arquivo de saida (sem extensao) | (nome do input) |
 | `--format` | Formato(s): `markdown`, `html`, `json` | `markdown` |
 | `--mode` | `text-first` ou `ocr-only` | `text-first` |
 | `--dpi` | Resolucao de renderizacao do PDF | `200` |
 | `--resume` | Retoma processamento interrompido | `false` |
-| `--ocr-mode` | `legacy`, `hybrid`, `classic_only`, `ai_only` | `legacy` |
-| `--classic-engine` | Motor clasico: `tesseract`, `paddle` | `tesseract` |
-| `--ocr-langs` | Idiomas para OCR clasico (ex: `por+eng`) | `por+eng` |
-| `--quality-threshold` | Score minimo para aceitar OCR clasico (0-1) | `0.70` |
+| `--ocr-mode` | `hybrid`, `legacy`, `classic_only`, `ai_only` | `hybrid` |
+| `--classic-engine` | Motor classico: `tesseract` | `tesseract` |
+| `--ocr-langs` | Idiomas para OCR classico (ex: `por+eng`) | `por+eng` |
+| `--quality-threshold` | Score minimo para aceitar OCR (0-1) | `0.70` |
 | `--timeout` | Timeout por requisicao (segundos) | `300` |
 | `--retries` | Numero de tentativas por pagina | `3` |
 
@@ -235,57 +264,7 @@ DIR_DO_INPUT/
     └── documento.json        # (se --format json)
 ```
 
-Arquivos temporarios (`.partial`, `.metadata.json`) sao removidos automaticamente ao final com sucesso.
-
-## Arquitetura Hibrida (OCR Engine)
-
-```
-                    ┌──────────────┐
-                    │  OCRRouter   │
-                    │  (roteador)  │
-                    └──────┬───────┘
-                           │
-              ┌────────────┼────────────┐
-              ▼            ▼            ▼
-        ┌──────────┐ ┌──────────┐ ┌──────────┐
-        │ Tesseract│ │ PaddleOCR│ │ AIEngine │
-        │ (rapido) │ │ (medio)  │ │ (GLM-OCR)│
-        └──────────┘ └──────────┘ └──────────┘
-              │            │            │
-              ▼            ▼            ▼
-        ┌─────────────────────────────────────┐
-        │        QualityScorer                │
-        │  (heuristica de qualidade do texto) │
-        └─────────────────────────────────────┘
-              │
-              ▼
-        ┌─────────────────────────────────────┐
-        │        OutputNormalizer             │
-        │  (limpeza de ruido de OCR)          │
-        └─────────────────────────────────────┘
-```
-
-### Fluxo de Decisao do Router (modo hybrid)
-
-1. Se texto nativo tem qualidade suficiente (`has_meaningful_text`): **usa texto nativo** (gratis, instantaneo)
-2. Tenta **Tesseract** (mais rapido): se score >= threshold, aceita
-3. Se Tesseract falhar ou score baixo: tenta **PaddleOCR** (se disponivel)
-4. Se todos os clasicos falharem: **fallback para IA (GLM-OCR)**
-
-### QualityScorer
-
-Analisa 6 sinais objetivos:
-- `alphanumeric_ratio` (35%): proporcao de letras/numeros
-- `symbol_ratio` (20%): proporcao de simbolos estranhos
-- `avg_line_length` (15%): media de chars por linha
-- `empty_line_ratio` (10%): linhas vazias
-- `repeated_chars` (10%): repeticoes suspeitas
-- `engine_confidence` (10%): confianca do motor (se disponivel)
-
-Thresholds configuracao:
-- `>= 0.70`: texto OK, aceitar
-- `>= 0.40`: texto mediano, tentar proximo motor
-- `< 0.40`: texto ruim, fallback obrigatorio
+Arquivos temporarios (`.partial`, `.metadata.json`) sao removidos automaticamente ao final com sucesso. Se alguma pagina precisar de IA (LM Studio offline), os parciais sao preservados para `--resume`.
 
 ## Troubleshooting
 
@@ -293,12 +272,21 @@ Thresholds configuracao:
 
 **"Tesseract not in PATH"**: O engine busca automaticamente em `C:\Program Files\Tesseract-OCR\tesseract.exe`. Se instalou em outro local, defina a variavel de ambiente `TESSERACT_CMD`.
 
-**"LM Studio endpoint offline"**: O servidor nao esta rodando. Se estiver no modo `hybrid` com Tesseract disponivel, ele usa OCR clasico. Caso contrario, inicie o LM Studio.
+**"LM Studio endpoint offline"**: O servidor nao esta rodando. Se estiver no modo `hybrid` com Tesseract disponivel, ele usa OCR classico nas paginas que passarem no teste de qualidade. Para processar as paginas restantes com IA, inicie o LM Studio.
 
 **"Request failed after X attempts"**: Aumente `--timeout` ou verifique se o modelo terminou de carregar no LM Studio.
 
-**"Fidelity: PARTIAL"**: Score de qualidade do OCR clasico abaixo do threshold. Aumente `--dpi` para 300-400 ou use `--ocr-mode hybrid` para ativar fallback para IA.
+**"Fidelity: PASS"**: Todas as paginas processadas com sucesso. Voce pode confiar no resultado.
 
-**"Saida vazia ou incorreta"**: Aumente `--dpi` para 300-400. Se for OCR clasico, tente `--ocr-mode hybrid`.
+**"Fidelity: PARTIAL"**: Algumas paginas podem ter qualidade abaixo do ideal.
+- Se houver mensagem "LM Studio needed": inicie o LM Studio e execute com `--resume`
+- Se nao houver: aumente `--dpi` para 300-400 ou use `--quality-threshold 0.60`
+
+**"LM Studio needed"**: Uma ou mais paginas precisam de IA porque o OCR classico nao atingiu a qualidade minima. Inicie o LM Studio com o modelo de OCR carregado e execute novamente com `--resume`:
+```bash
+python "SKILL_DIR/main.py" "INPUT_PATH" --resume
+```
+
+**"Saida vazia ou incorreta"**: Aumente `--dpi` para 300-400.
 
 **GPU AMD**: A aceleracao AMD e gerenciada pelo LM Studio. O pipeline Python e puramente cliente HTTP, sem CUDA.

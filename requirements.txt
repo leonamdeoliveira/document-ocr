@@ -6,7 +6,5 @@ python-pptx>=0.6.23
 html2text>=2024.2.26
 beautifulsoup4>=4.12.0
 
-# OCR Clássico (opcional - instale conforme necessidade)
-# pytesseract>=0.3.10
-# ocrmypdf>=15.0.0
-# paddleocr>=2.7.0
+# OCR Clássico (opcional)
+pytesseract>=0.3.10

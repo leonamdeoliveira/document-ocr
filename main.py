@@ -19,9 +19,9 @@ from ocr_engine import (
     OCRRouter,
     OCREngineBase,
     OCREngineError,
+    EngineNotAvailableError,
     AIEngine,
     TesseractEngine,
-    PaddleEngine,
 )
 
 logging.basicConfig(
@@ -118,13 +118,13 @@ def parse_args() -> argparse.Namespace:
         help="Max retries per request (default: 3)",
     )
     parser.add_argument(
-        "--ocr-mode", type=str, default="",
-        choices=["", "legacy", "hybrid", "classic_only", "ai_only"],
-        help="OCR mode: legacy (default), hybrid, classic_only, ai_only",
+        "--ocr-mode", type=str, default="hybrid",
+        choices=["legacy", "hybrid", "classic_only", "ai_only"],
+        help="OCR mode: hybrid (default), legacy, classic_only, ai_only",
     )
     parser.add_argument(
         "--classic-engine", type=str, default="",
-        choices=["", "tesseract", "paddle"],
+        choices=["", "tesseract"],
         help="Classic OCR engine for hybrid/classic_only modes",
     )
     parser.add_argument(
@@ -169,7 +169,10 @@ def main():
         logger.info("Done!")
         return
 
-    model_name = args.model or _pick_model()
+    ocr_mode = args.ocr_mode or os.environ.get("OCR_MODE", "hybrid")
+    model_name = args.model or (
+        "glm-ocr" if ocr_mode in ("hybrid", "classic_only") else _pick_model()
+    )
     model_config = load_model_config(model_name)
 
     base_url = args.lmstudio_url or os.environ.get("LMSTUDIO_BASE_URL") or "http://localhost:1234/v1"
@@ -212,7 +215,6 @@ def main():
 
     hybrid_config = None
     router = None
-    ocr_mode = args.ocr_mode or os.environ.get("OCR_MODE", "legacy")
     if ocr_mode != "legacy":
         hybrid_config = HybridOCRConfig(
             mode=ocr_mode,
@@ -223,7 +225,6 @@ def main():
                 else float(os.environ.get("QUALITY_THRESHOLD_ACCEPT", "0.70"))
             ),
             enable_glm_fallback=os.environ.get("ENABLE_GLM_FALLBACK", "true").lower() == "true",
-            enable_paddle=os.environ.get("ENABLE_PADDLE_FALLBACK", "false").lower() == "true",
             ocr_timeout=timeout,
         )
         logger.info("OCR Mode: %s (classic=%s, langs=%s, accept=%.2f)",
@@ -237,11 +238,6 @@ def main():
         tesseract = TesseractEngine(langs=hybrid_config.langs, timeout=hybrid_config.ocr_timeout)
         engines[tesseract.name] = tesseract
         logger.info("Tesseract available: %s", tesseract.is_available())
-
-        if hybrid_config.enable_paddle or hybrid_config.classic_engine == "paddle":
-            paddle = PaddleEngine(langs=hybrid_config.langs)
-            engines[paddle.name] = paddle
-            logger.info("PaddleOCR available: %s", paddle.is_available())
 
         router = OCRRouter(engines=engines, config=hybrid_config)
 
@@ -315,6 +311,11 @@ def main():
                 pipeline._save_partial(1, fmt, content)
                 pipeline._append_saida(fmt, content)
                 last_content = content
+            except EngineNotAvailableError as e:
+                error = str(e)
+                print(f"\n[!] {error}\n", flush=True)
+                logger.error("Image processing failed (LM Studio needed): %s", e)
+                break
             except (LMStudioClientError, OCREngineError) as e:
                 error = str(e)
                 logger.error("Image processing failed: %s", e)
@@ -344,7 +345,12 @@ def main():
         sys.exit(1)
 
     ok = sum(1 for r in results if r.status in ("ok", "resumed"))
-    logger.info("Processing complete: %d/%d pages OK", ok, len(results))
+    lmstudio_needed = sum(1 for r in results if r.status == "error: lm_studio_needed")
+    if lmstudio_needed > 0:
+        logger.info("Processing complete: %d/%d pages OK, %d page(s) need LM Studio (use --resume)",
+                     ok, len(results), lmstudio_needed)
+    else:
+        logger.info("Processing complete: %d/%d pages OK", ok, len(results))
 
 
 if __name__ == "__main__":

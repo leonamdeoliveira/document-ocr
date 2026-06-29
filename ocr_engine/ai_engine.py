@@ -35,7 +35,10 @@ class AIEngine(OCREngineBase):
         return f"ai:{self._model_name}"
 
     def is_available(self) -> bool:
-        return True
+        try:
+            return self._client.is_server_available()
+        except Exception:
+            return False
 
     def supports(self, page: PDFPage) -> bool:
         return True
@@ -77,6 +80,3 @@ class AIEngine(OCREngineBase):
             processing_time=elapsed,
             metadata={"model": self._model_name, "mode": self._mode},
         )
-
-    def extract_text_with_confidence(self, page: PDFPage, **kwargs) -> EngineResult:
-        return self.extract_text(page, **kwargs)

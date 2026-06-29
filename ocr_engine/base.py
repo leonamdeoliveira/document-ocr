@@ -13,14 +13,6 @@ class EngineNotAvailableError(OCREngineError):
     """Raised when the engine's dependencies are not installed."""
 
 
-class EngineTimeoutError(OCREngineError):
-    """Raised when the engine times out processing a page."""
-
-
-class EngineRejectedError(OCREngineError):
-    """Raised when the engine rejects the input (unsupported format, etc.)."""
-
-
 @dataclass
 class EngineResult:
     text: str
@@ -43,10 +35,6 @@ class OCREngineBase(ABC):
 
     @abstractmethod
     def extract_text(self, page: PDFPage, **kwargs) -> EngineResult:
-        ...
-
-    @abstractmethod
-    def extract_text_with_confidence(self, page: PDFPage, **kwargs) -> EngineResult:
         ...
 
     @abstractmethod

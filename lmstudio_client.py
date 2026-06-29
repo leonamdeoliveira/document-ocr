@@ -35,6 +35,13 @@ class LMStudioClient:
         self.max_tokens = max_tokens
         self.extra_params = extra_params or {}
 
+    def is_server_available(self, timeout: int = 5) -> bool:
+        try:
+            resp = requests.get(f"{self.base_url}/models", timeout=timeout)
+            return resp.ok
+        except requests.exceptions.RequestException:
+            return False
+
     def _encode_image(self, image: Image.Image) -> tuple[str, str]:
         buffer = BytesIO()
         if image.mode != "RGB":
