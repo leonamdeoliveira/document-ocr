@@ -2,6 +2,9 @@ import re
 from dataclasses import dataclass
 from typing import Optional
 
+from document_model import TextItem, TableItem
+
+
 @dataclass
 class QualityReport:
     score: float
@@ -32,6 +35,34 @@ class QualityReport:
         }
 
 
+@dataclass
+class ItemQualityReport:
+    item_id: str
+    label: str
+    page_num: int
+    score: float
+    char_count: int
+    alphanumeric_ratio: float
+    symbol_ratio: float
+    avg_line_length: float
+    engine_confidence: Optional[float]
+    acceptable: bool
+
+    def to_dict(self) -> dict:
+        return {
+            "item_id": self.item_id,
+            "label": self.label,
+            "page": self.page_num,
+            "score": round(self.score, 4),
+            "char_count": self.char_count,
+            "alphanumeric_ratio": round(self.alphanumeric_ratio, 4),
+            "symbol_ratio": round(self.symbol_ratio, 4),
+            "avg_line_length": round(self.avg_line_length, 2),
+            "engine_confidence": self.engine_confidence,
+            "acceptable": self.acceptable,
+        }
+
+
 _CHAR_REPEAT_PATTERN = re.compile(r"(.)\1{7,}")
 
 
@@ -51,8 +82,8 @@ class QualityScorer:
     MAX_SYMBOL_RATIO = 0.10
     MAX_EMPTY_LINE_RATIO = 0.50
 
-    def score(self, text: str, engine_confidence: Optional[float] = None) -> QualityReport:
-        if not text or len(text.strip()) < self.MIN_CHARS:
+    def score(self, text: str, engine_confidence: Optional[float] = None, min_chars: int = 20) -> QualityReport:
+        if not text or len(text.strip()) < min_chars:
             return QualityReport(
                 score=0.0,
                 char_count=len(text),
@@ -107,3 +138,59 @@ class QualityScorer:
             has_repeated_chars=has_repeated,
             engine_confidence=engine_confidence,
         )
+
+    def score_item(self, item, threshold: float = 0.70) -> ItemQualityReport:
+        if isinstance(item, TextItem):
+            text = item.text
+            label = "heading" if hasattr(item, "heading_level") else "text"
+            page_num = item.page_num
+            item_id = item.id
+        elif isinstance(item, TableItem):
+            text = "\n".join(
+                " | ".join(str(c) for c in row)
+                for row in item.rows
+            )
+            label = "table"
+            page_num = item.page_num
+            item_id = item.id
+        else:
+            return ItemQualityReport(
+                item_id=getattr(item, "id", "unknown"),
+                label=getattr(item, "label", "unknown"),
+                page_num=getattr(item, "page_num", 0),
+                score=1.0,
+                char_count=0,
+                alphanumeric_ratio=0.0,
+                symbol_ratio=0.0,
+                avg_line_length=0.0,
+                engine_confidence=None,
+                acceptable=True,
+            )
+
+        if label == "heading":
+            item_min_chars = 5
+        elif label == "table":
+            item_min_chars = 10
+        else:
+            item_min_chars = 20
+        report = self.score(text, engine_confidence=item.confidence, min_chars=item_min_chars)
+        return ItemQualityReport(
+            item_id=item_id,
+            label=label,
+            page_num=page_num,
+            score=report.score,
+            char_count=report.char_count,
+            alphanumeric_ratio=report.alphanumeric_ratio,
+            symbol_ratio=report.symbol_ratio,
+            avg_line_length=report.avg_line_length,
+            engine_confidence=report.engine_confidence,
+            acceptable=report.acceptable(threshold),
+        )
+
+    def score_document_items(self, items: list, threshold: float = 0.70) -> list[ItemQualityReport]:
+        reports = []
+        for item in items:
+            report = self.score_item(item, threshold)
+            reports.append(report)
+            item.confidence = report.score
+        return reports

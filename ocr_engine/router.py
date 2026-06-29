@@ -71,21 +71,6 @@ class OCRRouter:
         }
         return qreport.acceptable(accept_threshold), report
 
-    def select_engine(self, page: PDFPage) -> str:
-        if self.config.mode in ("legacy", "ai_only"):
-            for name in self.engines:
-                if name.startswith("ai:"):
-                    return name
-            return "ai:unknown"
-
-        if self.config.mode == "classic_only":
-            return self.config.classic_engine
-
-        if has_meaningful_text(page.native_text, min_chars=50):
-            return "native"
-
-        return self.config.classic_engine
-
     def process_with_fallback(self, page: PDFPage, **kwargs) -> EngineResult:
         mode = self.config.mode
 
@@ -103,7 +88,8 @@ class OCRRouter:
         return timed_extract(ai_engine, page, **kwargs)
 
     def _run_classic_only(self, page: PDFPage, **kwargs) -> EngineResult:
-        engine = self._get_engine(self.config.classic_engine)
+        engine_name = self.config.classic_engine
+        engine = self._get_engine(engine_name)
         if engine is None:
             raise EngineNotAvailableError(
                 f"Classic engine '{self.config.classic_engine}' not available"
@@ -156,7 +142,7 @@ class OCRRouter:
             )
 
         if self.config.enable_glm_fallback:
-            logger.info("Router [page %d]: all classic engines failed, falling back to AI", page.page_num)
+            logger.info("Router [page %d]: all classic/VLM engines failed, falling back to AI", page.page_num)
             ai_engine = self._get_ai_engine()
             if not ai_engine.is_available():
                 raise EngineNotAvailableError(

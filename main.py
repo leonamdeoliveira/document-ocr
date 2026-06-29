@@ -67,7 +67,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Document OCR pipeline via LM Studio local API"
     )
-    parser.add_argument("input", type=str, help="Path to input PDF or image file")
+    parser.add_argument("input", type=str, help="Path to input PDF, image, or document file")
     parser.add_argument(
         "--out", type=str, default=None,
         help="Output directory (default: DIR_DO_INPUT/saida_ocr)",
@@ -94,7 +94,8 @@ def parse_args() -> argparse.Namespace:
         help="OCR model to use (default: prompted interactively). Choices: " + ", ".join(_list_available_models()),
     )
     parser.add_argument(
-        "--dpi", type=int, default=None, help="DPI for PDF rasterization (default: model config)"
+        "--dpi", type=int, default=None,
+        help="DPI for PDF rasterization (default: model config)",
     )
     parser.add_argument(
         "--resume", action="store_true",
@@ -137,6 +138,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--quality-threshold", type=float, default=None,
         help="Quality score threshold to accept classic OCR (0-1, default: 0.70)",
+    )
+    parser.add_argument(
+        "--no-layout", action="store_true",
+        help="Disable layout analysis (fallback to full-page OCR)",
     )
     return parser.parse_args()
 
@@ -218,6 +223,8 @@ def main():
 
     hybrid_config = None
     router = None
+    use_layout = not args.no_layout
+
     if ocr_mode != "legacy":
         hybrid_config = HybridOCRConfig(
             mode=ocr_mode,
@@ -244,6 +251,7 @@ def main():
 
         router = OCRRouter(engines=engines, config=hybrid_config)
 
+    image_output_dir = output_dir / "images"
     pipeline = OCRPipeline(
         client=client,
         output_dir=output_dir,
@@ -255,13 +263,15 @@ def main():
         basename=basename,
         hybrid_config=hybrid_config,
         router=router,
+        use_layout=use_layout,
+        image_output_dir=image_output_dir,
     )
 
     if ext == ".pdf":
         use_multi = model_config.get("use_multi_image", False)
         if use_multi and not args.resume:
-            from pdf_utils import load_pdf
-            pages = load_pdf(path=input_path, dpi=dpi, mode=args.mode)
+            from pdf_utils import load_pdf as load_pdf_fn
+            pages = load_pdf_fn(path=input_path, dpi=dpi, mode=args.mode)
             bs = model_config.get("batch_size", 0) or len(pages)
             batches = [pages[i:i+bs] for i in range(0, len(pages), bs)]
             logger.info("Batch processing %d pages in %d batch(es) of %d", len(pages), len(batches), bs)
@@ -344,7 +354,7 @@ def main():
                 metadata.unlink()
         logger.info("Done!")
     else:
-        logger.error("Unsupported file type: %s (use .pdf, .png, .jpg, .jpeg, .docx, .pptx, .html)", ext)
+        logger.error("Unsupported file type: %s (use .pdf, .png, .jpg, .jpeg, .docx, .pptx, .html, .xlsx, .epub, .csv, .md, .tex, .txt)", ext)
         sys.exit(1)
 
     ok = sum(1 for r in results if r.status in ("ok", "resumed"))
